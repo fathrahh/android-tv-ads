@@ -1,43 +1,15 @@
-import 'dart:async';
-import 'dart:io';
-
+import 'package:webview_flutter/webview_flutter.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:android_tv_ads/template/youtube_frame.dart';
+import 'package:marquee/marquee.dart';
 
-Future main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  // await Permission.camera.request();
-  // await Permission.microphone.request();
-  // await Permission.storage.request();
-
-  if (Platform.isAndroid) {
-    await AndroidInAppWebViewController.setWebContentsDebuggingEnabled(true);
-
-    var swAvailable = await AndroidWebViewFeature.isFeatureSupported(
-        AndroidWebViewFeature.SERVICE_WORKER_BASIC_USAGE);
-    var swInterceptAvailable = await AndroidWebViewFeature.isFeatureSupported(
-        AndroidWebViewFeature.SERVICE_WORKER_SHOULD_INTERCEPT_REQUEST);
-
-    if (swAvailable && swInterceptAvailable) {
-      AndroidServiceWorkerController serviceWorkerController =
-          AndroidServiceWorkerController.instance();
-
-      await serviceWorkerController
-          .setServiceWorkerClient(AndroidServiceWorkerClient(
-        shouldInterceptRequest: (request) async {
-          return null;
-        },
-      ));
-    }
-  }
-
+void main() {
   runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -45,6 +17,7 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
       ),
+      debugShowCheckedModeBanner: false,
       home: const MyHomePage(title: 'Flutter Demo Home Page'),
     );
   }
@@ -59,68 +32,95 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  final GlobalKey webViewKey = GlobalKey();
-
-  InAppWebViewController? webViewController;
-  InAppWebViewGroupOptions options = InAppWebViewGroupOptions(
-    crossPlatform: InAppWebViewOptions(
-      useShouldOverrideUrlLoading: true,
-      mediaPlaybackRequiresUserGesture: false,
-    ),
-    android: AndroidInAppWebViewOptions(
-      useHybridComposition: true,
-    ),
-    ios: IOSInAppWebViewOptions(
-      allowsInlineMediaPlayback: true,
-    ),
-  );
-
-  late PullToRefreshController pullToRefreshController;
-  String url = "";
-  double progress = 0;
-  final urlController = TextEditingController();
+  late final WebViewController _controller;
 
   @override
   void initState() {
     super.initState();
 
-    pullToRefreshController = PullToRefreshController(
-      options: PullToRefreshOptions(
-        color: Colors.blue,
-      ),
-      onRefresh: () async {
-        if (Platform.isAndroid) {
-          webViewController?.reload();
-        } else if (Platform.isIOS) {
-          webViewController?.loadUrl(
-              urlRequest: URLRequest(url: await webViewController?.getUrl()));
-        }
-      },
-    );
-  }
+    // #docregion platform_features
+    // late final PlatformWebViewControllerCreationParams params;
+    // if (WebViewPlatform.instance is WebKitWebViewPlatform) {
+    //   params = WebKitWebViewControllerCreationParams(
+    //     allowsInlineMediaPlayback: true,
+    //     mediaTypesRequiringUserAction: const <PlaybackMediaTypes>{},
+    //   );
+    // } else {
+    //   params = const PlatformWebViewControllerCreationParams();
+    // }
 
-  @override
-  void dispose() {
-    super.dispose();
+    final WebViewController controller = WebViewController();
+    // #enddocregion platform_features
+
+    controller
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(const Color(0x00000000))
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onProgress: (int progress) {
+            debugPrint('WebView is loading (progress : $progress%)');
+          },
+          onPageStarted: (String url) {
+            debugPrint('Page started loading: $url');
+          },
+          onPageFinished: (String url) {
+            debugPrint('Page finished loading: $url');
+          },
+          onUrlChange: (UrlChange change) {
+            if (change.url != null &&
+                change.url!.contains('youtube.com/watch?v=')) {
+              RegExp regExp = RegExp(r'v=([A-Za-z0-9_\-]+)');
+              Match? match = regExp.firstMatch(change.url!);
+              debugPrint(change.url);
+              debugPrint(match.toString());
+
+              if (match != null && match.groupCount >= 1) {
+                _controller.loadHtmlString(htmlTemplate(match.group(1)!));
+              }
+            }
+          },
+        ),
+      )
+      ..addJavaScriptChannel(
+        'Toaster',
+        onMessageReceived: (JavaScriptMessage message) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(message.message)),
+          );
+        },
+      )
+      ..loadRequest(Uri.parse('https://youtube.com'));
+
+    // #docregion platform_features
+    // if (controller.platform is AndroidWebViewController) {
+    //   AndroidWebViewController.enableDebugging(true);
+    //   (controller.platform as AndroidWebViewController)
+    //       .setMediaPlaybackRequiresUserGesture(false);
+    // }
+    // #enddocregion platform_features
+
+    _controller = controller;
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        child: SizedBox(
+        child: Container(
+          padding: const EdgeInsets.all(32.0),
           height: MediaQuery.of(context).size.height,
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
                 child: Row(
                   children: [
                     Expanded(
-                      flex: 4,
+                      flex: 5,
                       child: Container(
                         color: Colors.amber,
                         child: Column(children: [
-                          Row(
+                          const Row(
                             children: [
                               Text("Apotek Manjur"),
                               Expanded(
@@ -129,101 +129,19 @@ class _MyHomePageState extends State<MyHomePage> {
                             ],
                           ),
                           Expanded(
-                            child: InAppWebView(
-                              key: webViewKey,
-                              initialUrlRequest: URLRequest(
-                                  url: Uri.parse("https://www.youtube.com/")),
-                              initialOptions: options,
-                              pullToRefreshController:
-                                  pullToRefreshController,
-                              onWebViewCreated: (controller) {
-                                webViewController = controller;
-                              },
-                              onLoadStart: (controller, url) {
-                                setState(() {
-                                  this.url = url.toString();
-                                  urlController.text = this.url;
-                                });
-                              },
-                              androidOnPermissionRequest:
-                                  (controller, origin, resources) async {
-                                return PermissionRequestResponse(
-                                    resources: resources,
-                                    action: PermissionRequestResponseAction
-                                        .GRANT);
-                              },
-                              // shouldOverrideUrlLoading:
-                              //     (controller, navigationAction) async {
-                              //   var uri = navigationAction.request.url!;
-
-                              //   if (![
-                              //     "http",
-                              //     "https",
-                              //     "file",
-                              //     "chrome",
-                              //     "data",
-                              //     "javascript",
-                              //     "about"
-                              //   ].contains(uri.scheme)) {
-                              //     if (await canLaunch(url)) {
-                              //       // Launch the App
-                              //       await launch(
-                              //         url,
-                              //       );
-                              //       // and cancel the request
-                              //       return NavigationActionPolicy.CANCEL;
-                              //     }
-                              //   }
-
-                              //   return NavigationActionPolicy.ALLOW;
-                              // },
-                              onLoadStop: (controller, url) async {
-                                pullToRefreshController.endRefreshing();
-                                setState(() {
-                                  this.url = url.toString();
-                                  urlController.text = this.url;
-                                });
-                              },
-                              onLoadError: (controller, url, code, message) {
-                                pullToRefreshController.endRefreshing();
-                              },
-                              onProgressChanged: (controller, progress) {
-                                if (progress == 100) {
-                                  pullToRefreshController.endRefreshing();
-                                }
-                                setState(() {
-                                  this.progress = progress / 100;
-                                  urlController.text = url;
-                                });
-                              },
-                              onUpdateVisitedHistory:
-                                  (controller, url, androidIsReload) {
-                                setState(() {
-                                  this.url = url.toString();
-                                  urlController.text = this.url;
-                                });
-                              },
-                              onEnterFullscreen: (controller) {
-                                controller.evaluateJavascript(
-                                  source: """
-                                document.querySelector('video').webkitEnterFullScreen();
-                                """,
-                                );
-                              },
-                              onConsoleMessage: (controller, consoleMessage) {
-                                print(consoleMessage);
-                              },
+                            child: WebViewWidget(
+                              controller: _controller,
                             ),
                           ),
                         ]),
                       ),
                     ),
                     Expanded(
-                      flex: 1,
+                      flex: 2,
                       child: Container(
                         color: Colors.teal,
-                        child: Center(
-                          child: Text("Iklan kanan disini"),
+                        child: const Center(
+                          child: Text("Iklan kanan"),
                         ),
                       ),
                     ),
@@ -231,8 +149,27 @@ class _MyHomePageState extends State<MyHomePage> {
                 ),
               ),
               Container(
-                child: Text(
-                  "PROMO MERDEKA: SETIAP PEMBELIAN RHEA HEALTH BLA BLA BLA",
+                width: double.maxFinite,
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: Colors.black,
+                  ),
+                ),
+                padding:
+                    const EdgeInsets.symmetric(vertical: 10, horizontal: 32.0),
+                child: Row(
+                  children: [
+                    const Text(
+                      "PROMO MERDEKA : ",
+                    ),
+                    Expanded(
+                      child: Container(
+                        width: double.maxFinite,
+                        height: 40,
+                        child: Marquee(text: 'Hello World', blankSpace: 300.0),
+                      ),
+                    )
+                  ],
                 ),
               ),
             ],
